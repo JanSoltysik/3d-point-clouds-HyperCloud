@@ -11,7 +11,7 @@
     "metrics": [],
 
     "dataset": "custom",
-    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/custom",
+    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/custom/02958343",
     "classes": ["car"],
     "shuffle": true,
     "transforms": ["rotate"],

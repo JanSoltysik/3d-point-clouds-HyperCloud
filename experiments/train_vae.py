@@ -152,7 +152,7 @@ def main(config):
         total_loss_kld = 0.0
         for i, point_data in enumerate(points_dataloader, 1):
 
-            X, _ = point_data
+            X = point_data
             X = X.to(device)
 
             # Change dim [BATCH, N_POINTS, N_DIM] -> [BATCH, N_DIM, N_POINTS]
