@@ -13,7 +13,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn.parallel
 import torch.optim as optim
 import torch.utils.data
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from models import aae
 from utils.pcutil import plot_3d_point_cloud
 from utils.util import find_latest_epoch, prepare_results_dir, cuda_setup, setup_logging, set_seed
@@ -68,6 +68,12 @@ def main(config):
         from datasets.shapenet import ShapeNetDataset
         dataset = ShapeNetDataset(root_dir=config['data_dir'],
                                   classes=config['classes'])
+    elif dataset_name == 'custom':
+        # read cloud points in txt format and then save them as TensorDataset
+        dataset = []
+        for file in os.listdir(config['data_dir']):
+            dataset.append(torch.as_tensor(np.genfromtxt(os.path.join(config['data_dir'], file))))
+        dataset = TensorDataset(torch.stack(dataset))
     else:
         raise ValueError(f'Invalid dataset name. Expected `shapenet` or '
                          f'`faust`. Got: `{dataset_name}`')
