@@ -1,5 +1,5 @@
 {
-    "results_root": "/3d_point_cloud/results",
+    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/custom_results",
     "clean_results_dir": false,
     "clean_weights_dir": false,
 
@@ -10,9 +10,9 @@
 
     "metrics": [],
 
-    "dataset": "shapenet",
-    "data_dir": "/3d_point_cloud/dataset/shapenet",
-    "classes": [],
+    "dataset": "custom",
+    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/custom",
+    "classes": ["car"],
     "shuffle": true,
     "transforms": ["rotate"],
     "num_workers": 8,
@@ -35,7 +35,7 @@
     "normal_std": 0.2,
 
     "seed": 2018,
-    "save_frequency": 1,
+    "save_frequency": 200,
     "epsilon": 0.001,
 
     "target_network_input": {

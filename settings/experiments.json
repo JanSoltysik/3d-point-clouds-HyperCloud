@@ -1,5 +1,5 @@
 {
-    "results_root": "/3d_point_cloud/results",
+    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/custom_results",
     "arch": "vae",
     "clean_results_dir": false,
 
@@ -7,10 +7,10 @@
     "gpu": 0,
 
     "reconstruction_loss": "chamfer",
-    "dataset": "shapenet",
-    "data_dir": "/3d_point_cloud/dataset/shapenet",
+    "dataset": "custom",
+    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/custom",
 
-    "classes": [],
+    "classes": ["car"],
     "reconstruction_coef": 0.05,
 
     "seed": 2018,
