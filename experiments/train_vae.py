@@ -13,11 +13,12 @@ import torch.backends.cudnn as cudnn
 import torch.nn.parallel
 import torch.optim as optim
 import torch.utils.data
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 from models import aae
 from utils.pcutil import plot_3d_point_cloud
 from utils.util import find_latest_epoch, prepare_results_dir, cuda_setup, setup_logging, set_seed
 from utils.points import generate_points
+from datasets.txtDataset import TxtDataset, collate_fn
 
 cudnn.benchmark = True
 
@@ -69,11 +70,9 @@ def main(config):
         dataset = ShapeNetDataset(root_dir=config['data_dir'],
                                   classes=config['classes'])
     elif dataset_name == 'custom':
-        # read cloud points in txt format and then save them as TensorDataset
-        dataset = []
-        for file in os.listdir(config['data_dir']):
-            dataset.append(torch.as_tensor(np.genfromtxt(os.path.join(config['data_dir'], file))))
-        dataset = TensorDataset(torch.stack(dataset))
+        dataset = TxtDataset(root_dir=config['data_dir'],
+                             classes=config['classes'],
+                             config=config)
     else:
         raise ValueError(f'Invalid dataset name. Expected `shapenet` or '
                          f'`faust`. Got: `{dataset_name}`')
@@ -85,7 +84,7 @@ def main(config):
     points_dataloader = DataLoader(dataset, batch_size=config['batch_size'],
                                    shuffle=config['shuffle'],
                                    num_workers=config['num_workers'], drop_last=True,
-                                   pin_memory=True)
+                                   pin_memory=True, collate_fn=collate_fn)
 
     #
     # Models
@@ -151,13 +150,18 @@ def main(config):
         total_loss_r = 0.0
         total_loss_kld = 0.0
         for i, point_data in enumerate(points_dataloader, 1):
+            # get only visible part of point cloud
+            X = point_data['visible']
+            X = X.to(device, dtype=torch.float)
 
-            X = point_data
-            X = X.to(device)
+            # get whole point cloud
+            X_whole = point_data['cloud']
+            X_whole = X_whole.to(device, dtype=torch.float)
 
             # Change dim [BATCH, N_POINTS, N_DIM] -> [BATCH, N_DIM, N_POINTS]
             if X.size(-1) == 3:
                 X.transpose_(X.dim() - 2, X.dim() - 1)
+                X_whole.transpose_(X_whole.dim() - 2, X_whole.dim() - 1)
 
             codes, mu, logvar = encoder(X)
             target_networks_weights = hyper_network(codes)
@@ -173,7 +177,7 @@ def main(config):
 
             loss_r = torch.mean(
                 config['reconstruction_coef'] *
-                reconstruction_loss(X.permute(0, 2, 1) + 0.5,
+                reconstruction_loss(X_whole.permute(0, 2, 1) + 0.5,
                                     X_rec.permute(0, 2, 1) + 0.5))
 
             loss_kld = 0.5 * (torch.exp(logvar) + torch.pow(mu, 2) - 1 - logvar).sum()
@@ -205,7 +209,7 @@ def main(config):
         #
         # Save intermediate results
         #
-        X = X.cpu().numpy()
+        X = X_whole.cpu().numpy()
         X_rec = X_rec.detach().cpu().numpy()
 
         if epoch % config['save_frequency'] == 0:
