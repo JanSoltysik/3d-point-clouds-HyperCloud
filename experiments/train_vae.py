@@ -90,10 +90,12 @@ def main(config):
     # Models
     #
     hyper_network = aae.HyperNetwork(config, device).to(device)
-    encoder = aae.Encoder(config).to(device)
+    encoder_pocket = aae.Encoder(config).to(device)
+    encoder_visalbe = aae.Encoder(config).to(device)
 
     hyper_network.apply(weights_init)
-    encoder.apply(weights_init)
+    encoder_pocket.apply(weights_init)
+    encoder_visalbe.apply(weights_init)
 
     if config['reconstruction_loss'].lower() == 'chamfer':
         from losses.champfer_loss import ChamferLoss
@@ -111,7 +113,7 @@ def main(config):
     # Optimizers
     #
     e_hn_optimizer = getattr(optim, config['optimizer']['E_HN']['type'])
-    e_hn_optimizer = e_hn_optimizer(chain(encoder.parameters(), hyper_network.parameters()),
+    e_hn_optimizer = e_hn_optimizer(chain(encoder_visalbe.parameters(), encoder_pocket.parameters(), hyper_network.parameters()),
                                     **config['optimizer']['E_HN']['hyperparams'])
 
     log.info("Starting epoch: %s" % starting_epoch)
@@ -119,7 +121,9 @@ def main(config):
         log.info("Loading weights...")
         hyper_network.load_state_dict(torch.load(
             join(weights_path, f'{starting_epoch - 1:05}_G.pth')))
-        encoder.load_state_dict(torch.load(
+        encoder_pocket.load_state_dict(torch.load(
+            join(weights_path, f'{starting_epoch - 1:05}_E.pth')))
+        encoder_visalbe.load_state_dict(torch.load(
             join(weights_path, f'{starting_epoch - 1:05}_E.pth')))
 
         e_hn_optimizer.load_state_dict(torch.load(
@@ -144,7 +148,8 @@ def main(config):
         start_epoch_time = datetime.now()
         log.debug("Epoch: %s" % epoch)
         hyper_network.train()
-        encoder.train()
+        encoder_visalbe.train()
+        encoder_pocket.train()
 
         total_loss_all = 0.0
         total_loss_r = 0.0
@@ -154,6 +159,10 @@ def main(config):
             X = point_data['visible']
             X = X.to(device, dtype=torch.float)
 
+            # get not visible part of point cloud
+            X_pocket = point_data['non-visible']
+            X_pocket = X_pocket.to(device, dtype=torch.float)
+
             # get whole point cloud
             X_whole = point_data['cloud']
             X_whole = X_whole.to(device, dtype=torch.float)
@@ -161,10 +170,13 @@ def main(config):
             # Change dim [BATCH, N_POINTS, N_DIM] -> [BATCH, N_DIM, N_POINTS]
             if X.size(-1) == 3:
                 X.transpose_(X.dim() - 2, X.dim() - 1)
+                X_pocket.transpose_(X_pocket.dim() - 2, X_pocket.dim() - 1)
                 X_whole.transpose_(X_whole.dim() - 2, X_whole.dim() - 1)
 
-            codes, mu, logvar = encoder(X)
-            target_networks_weights = hyper_network(codes)
+            codes, mu, logvar = encoder_visalbe(X)
+            _, mu_pocket, _ = encoder_pocket(X_pocket)
+
+            target_networks_weights = hyper_network(torch.cat((codes, mu_pocket), 1))
 
             X_rec = torch.zeros(X.shape).to(device)
             for j, target_network_weights in enumerate(target_networks_weights):
@@ -184,7 +196,8 @@ def main(config):
 
             loss_all = loss_r + loss_kld
             e_hn_optimizer.zero_grad()
-            encoder.zero_grad()
+            encoder_visalbe.zero_grad()
+            encoder_pocket.zero_grad()
             hyper_network.zero_grad()
 
             loss_all.backward()
@@ -209,7 +222,8 @@ def main(config):
         #
         # Save intermediate results
         #
-        X = X_whole.cpu().numpy()
+        X = X.cpu().numpy()
+        X_whole = X_whole.cpu().numpy()
         X_rec = X_rec.detach().cpu().numpy()
 
         if epoch % config['save_frequency'] == 0:
@@ -219,8 +233,13 @@ def main(config):
                 fig.savefig(join(results_dir, 'samples', f'{epoch}_{k}_reconstructed.png'))
                 plt.close(fig)
 
-                fig = plot_3d_point_cloud(X[k][0], X[k][1], X[k][2], in_u_sphere=True, show=False)
+                fig = plot_3d_point_cloud(X_whole[k][0], X_whole[k][1], X_whole[k][2], in_u_sphere=True, show=False,
+                                          title=str(epoch))
                 fig.savefig(join(results_dir, 'samples', f'{epoch}_{k}_real.png'))
+                plt.close(fig)
+
+                fig = plot_3d_point_cloud(X[k][0], X[k][1], X[k][2], in_u_sphere=True, show=False)
+                fig.savefig(join(results_dir, 'samples', f'{epoch}_{k}_visible.png'))
                 plt.close(fig)
 
         if config['clean_weights_dir']:
@@ -232,7 +251,8 @@ def main(config):
             log.debug('Saving data...')
 
             torch.save(hyper_network.state_dict(), join(weights_path, f'{epoch:05}_G.pth'))
-            torch.save(encoder.state_dict(), join(weights_path, f'{epoch:05}_E.pth'))
+            torch.save(encoder_visalbe.state_dict(), join(weights_path, f'{epoch:05}_E.pth'))
+            torch.save(encoder_pocket.state_dict(), join(weights_path, f'{epoch:05}_E.pth'))
             torch.save(e_hn_optimizer.state_dict(), join(weights_path, f'{epoch:05}_EGo.pth'))
 
             np.save(join(metrics_path, f'{epoch:05}_E'), np.array(losses_e))

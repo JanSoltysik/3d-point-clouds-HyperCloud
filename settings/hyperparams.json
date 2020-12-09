@@ -1,5 +1,5 @@
 {
-    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/visible_results",
+    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/two_encoders",
     "clean_results_dir": false,
     "clean_weights_dir": false,
 
@@ -35,7 +35,7 @@
     "normal_std": 0.2,
 
     "seed": 2018,
-    "save_frequency": 50,
+    "save_frequency": 100,
     "epsilon": 0.001,
 
     "target_network_input": {

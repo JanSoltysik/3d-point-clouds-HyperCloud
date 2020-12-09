@@ -14,7 +14,7 @@ class HyperNetwork(nn.Module):
         target_network_use_bias = int(config['model']['TN']['use_bias'])
 
         self.model = nn.Sequential(
-            nn.Linear(in_features=self.z_size, out_features=64, bias=self.use_bias),
+            nn.Linear(in_features=2 * self.z_size, out_features=64, bias=self.use_bias),
             nn.ReLU(inplace=True),
 
             nn.Linear(in_features=64, out_features=128, bias=self.use_bias),
