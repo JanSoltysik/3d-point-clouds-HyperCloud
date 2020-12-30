@@ -1,5 +1,5 @@
 {
-    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/custom_results",
+    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/two_encoders_02",
     "arch": "vae",
     "clean_results_dir": false,
 
@@ -8,10 +8,11 @@
 
     "reconstruction_loss": "chamfer",
     "dataset": "custom",
-    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/custom",
+    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/visible/",
 
     "classes": ["car"],
     "reconstruction_coef": 0.05,
+    "n_points": 2048,
 
     "seed": 2018,
     "z_size": 2048,
@@ -53,25 +54,25 @@
     "experiments": {
 
         "interpolation": {
-            "execute": true,
+            "execute": false,
             "amount": 5,
             "transitions": 10
         },
 
         "interpolation_between_two_points": {
-            "execute": true,
+            "execute": false,
             "amount": 30,
             "transitions": 21,
             "image_points": 1000
         },
 
         "reconstruction": {
-            "execute": true,
+            "execute": false,
             "amount": 5
         },
 
         "sphere": {
-            "execute": true,
+            "execute": false,
             "amount": 10,
             "image_points": 10240,
             "start": 2.0,
@@ -80,7 +81,7 @@
         },
 
         "sphere_triangles": {
-            "execute": true,
+            "execute": false,
             "amount": 10,
             "method": "edge",
             "depth": 2,
@@ -90,7 +91,7 @@
         },
 
         "sphere_triangles_interpolation": {
-            "execute": true,
+            "execute": false,
             "amount": 10,
             "method": "edge",
             "depth": 2,
@@ -99,7 +100,7 @@
         },
 
         "different_number_of_points": {
-            "execute": true,
+            "execute": false,
             "amount": 5,
             "image_points": [10, 100, 1000, 2048, 10000]
         },

@@ -1,5 +1,5 @@
 {
-    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/two_encoders",
+    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/two_encoders_02",
     "clean_results_dir": false,
     "clean_weights_dir": false,
 

@@ -15,6 +15,7 @@ from models import aae
 from utils.pcutil import plot_3d_point_cloud
 from utils.util import find_latest_epoch, prepare_results_dir, cuda_setup, setup_logging, set_seed, get_weights_dir
 from utils.points import generate_points
+from datasets.txtDataset import TxtDataset, collate_fn
 
 cudnn.benchmark = True
 
@@ -54,6 +55,10 @@ def main(config):
         from datasets.shapenet import ShapeNetDataset
         dataset = ShapeNetDataset(root_dir=config['data_dir'],
                                   classes=config['classes'])
+    elif dataset_name == 'custom':
+        dataset = TxtDataset(root_dir=config['data_dir'],
+                             classes=config['classes'],
+                             config=config)
     else:
         raise ValueError(f'Invalid dataset name. Expected `shapenet` or '
                          f'`faust`. Got: `{dataset_name}`')
@@ -62,13 +67,14 @@ def main(config):
         'all' if not config['classes'] else ','.join(config['classes']), len(dataset)))
 
     points_dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=8, drop_last=True,
-                                   pin_memory=True)
+                                   pin_memory=True, collate_fn=collate_fn)
 
     #
     # Models
     #
     hyper_network = aae.HyperNetwork(config, device).to(device)
-    encoder = aae.Encoder(config).to(device)
+    encoder_visible = aae.Encoder(config).to(device)
+    encoder_pocket = aae.Encoder(config).to(device)
 
     if config['reconstruction_loss'].lower() == 'chamfer':
         from losses.champfer_loss import ChamferLoss
@@ -86,10 +92,12 @@ def main(config):
 
     log.info("Loading weights...")
     hyper_network.load_state_dict(torch.load(join(weights_path, f'{epoch:05}_G.pth')))
-    encoder.load_state_dict(torch.load(join(weights_path, f'{epoch:05}_E.pth')))
+    encoder_pocket.load_state_dict(torch.load(join(weights_path, f'{epoch:05}_EP.pth')))
+    encoder_visible.load_state_dict(torch.load(join(weights_path, f'{epoch:05}_EV.pth')))
 
     hyper_network.eval()
-    encoder.eval()
+    encoder_visible.eval()
+    encoder_pocket.eval()
 
     total_loss_eg = 0.0
     total_loss_e = 0.0
@@ -98,26 +106,37 @@ def main(config):
 
     with torch.no_grad():
         for i, point_data in enumerate(points_dataloader, 1):
-            X, _ = point_data
-            X = X.to(device)
+            X = point_data['non-visible']
+            X = X.to(device, dtype=torch.float)
+
+            # get whole point cloud
+            X_whole = point_data['cloud']
+            X_whole = X_whole.to(device, dtype=torch.float)
+
+            # get visible point cloud
+            X_visible = point_data['visible']
+            X_visible = X_visible.to(device, dtype=torch.float)
 
             # Change dim [BATCH, N_POINTS, N_DIM] -> [BATCH, N_DIM, N_POINTS]
             if X.size(-1) == 3:
                 X.transpose_(X.dim() - 2, X.dim() - 1)
+                X_whole.transpose_(X_whole.dim() - 2, X_whole.dim() - 1)
+                X_visible.transpose_(X_visible.dim() - 2, X_visible.dim() - 1)
 
             x.append(X)
-            codes, mu, logvar = encoder(X)
-            target_networks_weights = hyper_network(codes)
+            codes, mu, logvar = encoder_pocket(X)
+            _, mu_visible, _ = encoder_visible(X_visible)
+            target_networks_weights = hyper_network(torch.cat((codes, mu_visible), 1))
 
-            X_rec = torch.zeros(X.shape).to(device)
+            X_rec = torch.zeros(X_whole.shape).to(device)
             for j, target_network_weights in enumerate(target_networks_weights):
                 target_network = aae.TargetNetwork(config, target_network_weights).to(device)
-                target_network_input = generate_points(config=config, epoch=epoch, size=(X.shape[2], X.shape[1]))
+                target_network_input = generate_points(config=config, epoch=epoch, size=(X_whole.shape[2], X_whole.shape[1]))
                 X_rec[j] = torch.transpose(target_network(target_network_input.to(device)), 0, 1)
 
             loss_e = torch.mean(
                 config['reconstruction_coef'] *
-                reconstruction_loss(X.permute(0, 2, 1) + 0.5,
+                reconstruction_loss(X_whole.permute(0, 2, 1) + 0.5,
                                     X_rec.permute(0, 2, 1) + 0.5))
 
             loss_kld = 0.5 * (torch.exp(logvar) + torch.pow(mu, 2) - 1 - logvar).sum()
@@ -136,28 +155,28 @@ def main(config):
         x = torch.cat(x)
 
         if config['experiments']['interpolation']['execute']:
-            interpolation(x, encoder, hyper_network, device, results_dir, epoch,
+            interpolation(x, encoder_pocket, hyper_network, device, results_dir, epoch,
                           config['experiments']['interpolation']['amount'],
                           config['experiments']['interpolation']['transitions'])
 
         if config['experiments']['interpolation_between_two_points']['execute']:
-            interpolation_between_two_points(encoder, hyper_network, device, x, results_dir, epoch,
+            interpolation_between_two_points(encoder_pocket, hyper_network, device, x, results_dir, epoch,
                                              config['experiments']['interpolation_between_two_points']['amount'],
                                              config['experiments']['interpolation_between_two_points']['image_points'],
                                              config['experiments']['interpolation_between_two_points']['transitions'])
 
         if config['experiments']['reconstruction']['execute']:
-            reconstruction(encoder, hyper_network, device, x, results_dir, epoch,
+            reconstruction(encoder_pocket, hyper_network, device, x, results_dir, epoch,
                            config['experiments']['reconstruction']['amount'])
 
         if config['experiments']['sphere']['execute']:
-            sphere(encoder, hyper_network, device, x, results_dir, epoch,
+            sphere(encoder_pocket, hyper_network, device, x, results_dir, epoch,
                    config['experiments']['sphere']['amount'], config['experiments']['sphere']['image_points'],
                    config['experiments']['sphere']['start'], config['experiments']['sphere']['end'],
                    config['experiments']['sphere']['transitions'])
 
         if config['experiments']['sphere_triangles']['execute']:
-            sphere_triangles(encoder, hyper_network, device, x, results_dir,
+            sphere_triangles(encoder_pocket, hyper_network, device, x, results_dir,
                              config['experiments']['sphere_triangles']['amount'],
                              config['experiments']['sphere_triangles']['method'],
                              config['experiments']['sphere_triangles']['depth'],
@@ -166,7 +185,7 @@ def main(config):
                              config['experiments']['sphere_triangles']['transitions'])
 
         if config['experiments']['sphere_triangles_interpolation']['execute']:
-            sphere_triangles_interpolation(encoder, hyper_network, device, x, results_dir,
+            sphere_triangles_interpolation(encoder_pocket, hyper_network, device, x, results_dir,
                                            config['experiments']['sphere_triangles_interpolation']['amount'],
                                            config['experiments']['sphere_triangles_interpolation']['method'],
                                            config['experiments']['sphere_triangles_interpolation']['depth'],
@@ -174,12 +193,15 @@ def main(config):
                                            config['experiments']['sphere_triangles_interpolation']['transitions'])
 
         if config['experiments']['different_number_of_points']['execute']:
-            different_number_of_points(encoder, hyper_network, x, device, results_dir, epoch,
+            different_number_of_points(encoder_pocket, hyper_network, x, device, results_dir, epoch,
                                        config['experiments']['different_number_of_points']['amount'],
                                        config['experiments']['different_number_of_points']['image_points'])
 
         if config['experiments']['fixed']['execute']:
-            fixed(hyper_network, device, results_dir, epoch, config['experiments']['fixed']['amount'],
+            X_visible = next(iter(points_dataloader))['visible'].to(device, dtype=torch.float)
+            X_visible.transpose_(X_visible.dim() - 2, X_visible.dim() - 1)
+            fixed(hyper_network, encoder_visible, X_visible, device, results_dir, epoch,
+                  config['experiments']['fixed']['amount'],
                   config['z_size'], config['experiments']['fixed']['mean'],
                   config['experiments']['fixed']['std'], (x.shape[1], x.shape[2]),
                   config['experiments']['fixed']['triangulation']['execute'],
@@ -429,12 +451,13 @@ def different_number_of_points(encoder, hyper_network, x, device, results_dir, e
             plt.close(fig)
 
 
-def fixed(hyper_network, device, results_dir, epoch, fixed_number, z_size, fixed_mean, fixed_std, x_shape, triangulation,
-          method, depth):
+def fixed(hyper_network, encoder_visible, X_visible, device, results_dir, epoch, fixed_number, z_size, fixed_mean,
+          fixed_std, x_shape, triangulation, method, depth):
     log.info("Fixed")
 
     fixed_noise = torch.zeros(fixed_number, z_size).normal_(mean=fixed_mean, std=fixed_std).to(device)
-    weights_fixed = hyper_network(fixed_noise)
+    _, encoder_output, _ = encoder_visible(X_visible)
+    weights_fixed = hyper_network(torch.cat((fixed_noise, encoder_output), 1))
 
     for j, weights in enumerate(weights_fixed):
         target_network = aae.TargetNetwork(config, weights).to(device)

@@ -91,11 +91,11 @@ def main(config):
     #
     hyper_network = aae.HyperNetwork(config, device).to(device)
     encoder_pocket = aae.Encoder(config).to(device)
-    encoder_visalbe = aae.Encoder(config).to(device)
+    encoder_visible = aae.Encoder(config).to(device)
 
     hyper_network.apply(weights_init)
     encoder_pocket.apply(weights_init)
-    encoder_visalbe.apply(weights_init)
+    encoder_visible.apply(weights_init)
 
     if config['reconstruction_loss'].lower() == 'chamfer':
         from losses.champfer_loss import ChamferLoss
@@ -113,7 +113,7 @@ def main(config):
     # Optimizers
     #
     e_hn_optimizer = getattr(optim, config['optimizer']['E_HN']['type'])
-    e_hn_optimizer = e_hn_optimizer(chain(encoder_visalbe.parameters(), encoder_pocket.parameters(), hyper_network.parameters()),
+    e_hn_optimizer = e_hn_optimizer(chain(encoder_visible.parameters(), encoder_pocket.parameters(), hyper_network.parameters()),
                                     **config['optimizer']['E_HN']['hyperparams'])
 
     log.info("Starting epoch: %s" % starting_epoch)
@@ -122,9 +122,9 @@ def main(config):
         hyper_network.load_state_dict(torch.load(
             join(weights_path, f'{starting_epoch - 1:05}_G.pth')))
         encoder_pocket.load_state_dict(torch.load(
-            join(weights_path, f'{starting_epoch - 1:05}_E.pth')))
-        encoder_visalbe.load_state_dict(torch.load(
-            join(weights_path, f'{starting_epoch - 1:05}_E.pth')))
+            join(weights_path, f'{starting_epoch - 1:05}_EP.pth')))
+        encoder_visible.load_state_dict(torch.load(
+            join(weights_path, f'{starting_epoch - 1:05}_EV.pth')))
 
         e_hn_optimizer.load_state_dict(torch.load(
             join(weights_path, f'{starting_epoch - 1:05}_EGo.pth')))
@@ -148,7 +148,7 @@ def main(config):
         start_epoch_time = datetime.now()
         log.debug("Epoch: %s" % epoch)
         hyper_network.train()
-        encoder_visalbe.train()
+        encoder_visible.train()
         encoder_pocket.train()
 
         total_loss_all = 0.0
@@ -156,12 +156,12 @@ def main(config):
         total_loss_kld = 0.0
         for i, point_data in enumerate(points_dataloader, 1):
             # get only visible part of point cloud
-            X = point_data['visible']
+            X = point_data['non-visible']
             X = X.to(device, dtype=torch.float)
 
             # get not visible part of point cloud
-            X_pocket = point_data['non-visible']
-            X_pocket = X_pocket.to(device, dtype=torch.float)
+            X_visible = point_data['visible']
+            X_visible = X_visible.to(device, dtype=torch.float)
 
             # get whole point cloud
             X_whole = point_data['cloud']
@@ -170,20 +170,20 @@ def main(config):
             # Change dim [BATCH, N_POINTS, N_DIM] -> [BATCH, N_DIM, N_POINTS]
             if X.size(-1) == 3:
                 X.transpose_(X.dim() - 2, X.dim() - 1)
-                X_pocket.transpose_(X_pocket.dim() - 2, X_pocket.dim() - 1)
+                X_visible.transpose_(X_visible.dim() - 2, X_visible.dim() - 1)
                 X_whole.transpose_(X_whole.dim() - 2, X_whole.dim() - 1)
 
-            codes, mu, logvar = encoder_visalbe(X)
-            _, mu_pocket, _ = encoder_pocket(X_pocket)
+            codes, mu, logvar = encoder_pocket(X)
+            _, mu_visible, _ = encoder_visible(X_visible)
 
-            target_networks_weights = hyper_network(torch.cat((codes, mu_pocket), 1))
+            target_networks_weights = hyper_network(torch.cat((codes, mu_visible), 1))
 
-            X_rec = torch.zeros(X.shape).to(device)
+            X_rec = torch.zeros(X_whole.shape).to(device)
             for j, target_network_weights in enumerate(target_networks_weights):
                 target_network = aae.TargetNetwork(config, target_network_weights).to(device)
 
                 if not config['target_network_input']['constant'] or target_network_input is None:
-                    target_network_input = generate_points(config=config, epoch=epoch, size=(X.shape[2], X.shape[1]))
+                    target_network_input = generate_points(config=config, epoch=epoch, size=(X_whole.shape[2], X_whole.shape[1]))
 
                 X_rec[j] = torch.transpose(target_network(target_network_input.to(device)), 0, 1)
 
@@ -196,7 +196,7 @@ def main(config):
 
             loss_all = loss_r + loss_kld
             e_hn_optimizer.zero_grad()
-            encoder_visalbe.zero_grad()
+            encoder_visible.zero_grad()
             encoder_pocket.zero_grad()
             hyper_network.zero_grad()
 
@@ -251,8 +251,8 @@ def main(config):
             log.debug('Saving data...')
 
             torch.save(hyper_network.state_dict(), join(weights_path, f'{epoch:05}_G.pth'))
-            torch.save(encoder_visalbe.state_dict(), join(weights_path, f'{epoch:05}_E.pth'))
-            torch.save(encoder_pocket.state_dict(), join(weights_path, f'{epoch:05}_E.pth'))
+            torch.save(encoder_visible.state_dict(), join(weights_path, f'{epoch:05}_EV.pth'))
+            torch.save(encoder_pocket.state_dict(), join(weights_path, f'{epoch:05}_EP.pth'))
             torch.save(e_hn_optimizer.state_dict(), join(weights_path, f'{epoch:05}_EGo.pth'))
 
             np.save(join(metrics_path, f'{epoch:05}_E'), np.array(losses_e))
