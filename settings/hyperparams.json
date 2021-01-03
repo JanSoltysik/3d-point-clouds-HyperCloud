@@ -1,5 +1,5 @@
 {
-    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/two_encoders_02",
+    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/results/benchmark",
     "clean_results_dir": false,
     "clean_weights_dir": false,
 
@@ -10,9 +10,9 @@
 
     "metrics": [],
 
-    "dataset": "custom",
-    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/visible/",
-    "classes": ["car"],
+    "dataset": "benchmark",
+    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/benchmark",
+    "classes": [],
     "shuffle": true,
     "transforms": ["rotate"],
     "num_workers": 8,

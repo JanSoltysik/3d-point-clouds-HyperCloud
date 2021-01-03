@@ -1,5 +1,5 @@
 {
-    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/two_encoders_02",
+    "results_root": "/mnt/users/jsoltysik/local/3d_point_cloud/results/benchmark",
     "arch": "vae",
     "clean_results_dir": false,
 
@@ -7,10 +7,10 @@
     "gpu": 0,
 
     "reconstruction_loss": "chamfer",
-    "dataset": "custom",
-    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/visible/",
+    "dataset": "benchmark",
+    "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/benchmark",
 
-    "classes": ["car"],
+    "classes": [],
     "reconstruction_coef": 0.05,
     "n_points": 2048,
 

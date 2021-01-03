@@ -15,7 +15,7 @@ from models import aae
 from utils.pcutil import plot_3d_point_cloud
 from utils.util import find_latest_epoch, prepare_results_dir, cuda_setup, setup_logging, set_seed, get_weights_dir
 from utils.points import generate_points
-from datasets.txtDataset import TxtDataset, collate_fn
+from datasets import TxtDataset, Benchmark, collate_fn
 
 cudnn.benchmark = True
 
@@ -73,8 +73,8 @@ def main(config):
     # Models
     #
     hyper_network = aae.HyperNetwork(config, device).to(device)
-    encoder_visible = aae.Encoder(config).to(device)
-    encoder_pocket = aae.Encoder(config).to(device)
+    encoder_visible = aae.VisibleEncoder(config).to(device)
+    encoder_pocket = aae.PocketEncoder(config).to(device)
 
     if config['reconstruction_loss'].lower() == 'chamfer':
         from losses.champfer_loss import ChamferLoss
@@ -125,7 +125,7 @@ def main(config):
 
             x.append(X)
             codes, mu, logvar = encoder_pocket(X)
-            _, mu_visible, _ = encoder_visible(X_visible)
+            mu_visible = encoder_visible(X_visible)
             target_networks_weights = hyper_network(torch.cat((codes, mu_visible), 1))
 
             X_rec = torch.zeros(X_whole.shape).to(device)
@@ -202,7 +202,7 @@ def main(config):
             X_visible.transpose_(X_visible.dim() - 2, X_visible.dim() - 1)
             fixed(hyper_network, encoder_visible, X_visible, device, results_dir, epoch,
                   config['experiments']['fixed']['amount'],
-                  config['z_size'], config['experiments']['fixed']['mean'],
+                  config['z_size'] // 2, config['experiments']['fixed']['mean'],
                   config['experiments']['fixed']['std'], (x.shape[1], x.shape[2]),
                   config['experiments']['fixed']['triangulation']['execute'],
                   config['experiments']['fixed']['triangulation']['method'],
@@ -456,7 +456,7 @@ def fixed(hyper_network, encoder_visible, X_visible, device, results_dir, epoch,
     log.info("Fixed")
 
     fixed_noise = torch.zeros(fixed_number, z_size).normal_(mean=fixed_mean, std=fixed_std).to(device)
-    _, encoder_output, _ = encoder_visible(X_visible)
+    encoder_output = encoder_visible(X_visible)
     weights_fixed = hyper_network(torch.cat((fixed_noise, encoder_output), 1))
 
     for j, weights in enumerate(weights_fixed):

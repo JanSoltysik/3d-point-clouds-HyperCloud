@@ -1,32 +1,47 @@
-from os import listdir
+from os import listdir, makedirs, remove
 from os.path import exists, join
-
+from zipfile import ZipFile
+import h5py
+import shutil
+import urllib
 import pandas as pd
 import numpy as np
-import torch
 from torch.utils.data import Dataset
+from sklearn.cluster import KMeans
+
 
 synth_id_to_category = {
+    '02691156': 'airplane',
+    '02933112': 'cabinet',
     '02958343': 'car',
+    '03001627': 'chair',
+    '03636649': 'lamp',
+    '04256520': 'sofa',
+    '04379243': 'table',
+    '04530566': 'vessel'
 }
 
 category_to_synth_id = {v: k for k, v in synth_id_to_category.items()}
 synth_id_to_number = {k: i for i, k in enumerate(synth_id_to_category.keys())}
 
 
-def collate_fn(batch):
-    """
-    Remove elements in order to have batch made of clouds of the same size.
-    """
-    result = {key: [] for key in batch[0].keys()}
-    max_len = [min([d[key] for d in batch], key=lambda x: len(x)).shape[0] for key in batch[0]]
-    for d in batch:
-        for i, key in enumerate(d):
-            result[key].append(torch.from_numpy(d[key][:max_len[i]]))
-    return {key: torch.stack(tensors) for key, tensors in result.items()}
+def cluster_data(original_shape_path: str, dst_data_path: str) -> None:
+    with h5py.File(original_shape_path, 'r') as f:
+        original_data = np.array(f['data'])
+
+    kmeans = KMeans(n_clusters=2).fit(original_data)
+
+    visible_data = original_data[kmeans.labels_ == 0]
+    pocket_data = original_data[kmeans.labels_ == 1]
+
+    file_prefix = original_shape_path.split('/')[-1].split('.')[0]
+
+    np.savetxt(join(dst_data_path, f"{file_prefix}_full.txt"), original_data)
+    np.savetxt(join(dst_data_path, f"{file_prefix}_pocket.txt"), pocket_data)
+    np.savetxt(join(dst_data_path, f"{file_prefix}_visible.txt"), visible_data)
 
 
-class TxtDataset(Dataset):
+class Benchmark(Dataset):
     def __init__(self, root_dir, classes=[],
                  transform=None, split='train', config=None):
         """
@@ -97,8 +112,8 @@ class TxtDataset(Dataset):
         return sample
 
     def load_object(self, directory: str, prefix: str) -> dict:  # dict<str, np.ndarray>
-        suffixes = ['_visible_mesh_data.txt', '_mesh_data.txt']
-        parts = ['visible', 'non-visible']
+        suffixes = ['_visible.txt', '_pocket.txt', '_full.txt']
+        parts = ['visible', 'non-visible', 'cloud']
         result = dict()
 
         for suffix, part in zip(suffixes, parts):
@@ -112,8 +127,6 @@ class TxtDataset(Dataset):
                 df = df.drop(drop_indices)
             result[part] = df.to_numpy()
 
-        # the result contains nodes containing visible and non-visible part and olso we are adding whole set of points
-        result['cloud'] = np.concatenate((result[parts[0]], result[parts[-1]]), axis=0)
         return result
 
     def _get_names(self) -> pd.DataFrame:
@@ -127,24 +140,66 @@ class TxtDataset(Dataset):
 
         return pd.DataFrame(file_prefixes_by_category, columns=['category', 'file_prefix'])
 
+    def _create_required_clouds(self):
+        # Merging all shapes from all of the dirs
+        all_extracted_files = listdir(self.root_dir)
+        created_dirs = ("train", "val")
+
+        for created_dir in created_dirs:
+            sub_dir = "gt"
+            for shape in listdir(join(self.root_dir, created_dir, sub_dir)):
+                src_shape_dir = join(self.root_dir, created_dir, sub_dir, shape)
+                dst_shape_dir = join(self.root_dir, shape)
+
+                makedirs(dst_shape_dir, exist_ok=True)
+
+                # save all clouds in [visible/pocket] format in newly created directories
+                for cloud in listdir(src_shape_dir):
+                    cluster_data(join(src_shape_dir, cloud), dst_shape_dir)
+
+        # remove all original files
+        for extracted_file in all_extracted_files:
+            shutil.rmtree(join(self.root_dir, extracted_file))
+
     def _maybe_download_data(self):
-        if not exists(self.root_dir):
-            raise FileNotFoundError("Dataset needs to be already downloaded.")
+        if exists(self.root_dir):
+            return
+
+        print(f'Benchmark doesn\'t exist in root directory {self.root_dir}. '
+              f'Downloading...')
+        makedirs(self.root_dir)
+
+        url = 'http://download.cs.stanford.edu/downloads/completion3d/dataset2019.zip'
+
+        data = urllib.request.urlopen(url)
+        filename = url.rpartition('/')[2]
+        file_path = join(self.root_dir, filename)
+        with open(file_path, mode='wb') as f:
+            d = data.read()
+            f.write(d)
+
+        print('Extracting...')
+        with ZipFile(file_path, mode='r') as zip_f:
+            zip_f.extractall(self.root_dir)
+
+        remove(file_path)
+        extracted_dir = join(self.root_dir,
+                             'shapenet')
+        for d in listdir(extracted_dir):
+            shutil.move(src=join(extracted_dir, d),
+                        dst=self.root_dir)
+
+        shutil.rmtree(extracted_dir)
+
+        print('Transforming...')
+        self._create_required_clouds()
 
 
 if __name__ == "__main__":
     import json
 
     from torch.utils.data import DataLoader
-    with open("../settings/hyperparams.json") as f:
+    with open("settings/hyperparams.json") as f:
         config = json.load(f)
 
-    dataset = TxtDataset(root_dir=config['data_dir'], classes=config['classes'], config=config)
-    print(len(dataset))
-    test = [dataset[i]['visible'] for i in range(10)]
-    points_dataloader = DataLoader(dataset, batch_size=50, shuffle=True, num_workers=1, drop_last=True,
-                                   collate_fn=collate_fn)
-    #for x in points_dataloader:
-    #    print(x)
-    X = next(iter(points_dataloader))
-    print(X['visible'].shape)
+    dataset = Benchmark(root_dir=config['data_dir'], classes=config['classes'], config=config)

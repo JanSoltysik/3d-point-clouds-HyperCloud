@@ -1,3 +1,5 @@
+from abc import ABC
+
 import torch
 import torch.nn as nn
 
@@ -14,7 +16,7 @@ class HyperNetwork(nn.Module):
         target_network_use_bias = int(config['model']['TN']['use_bias'])
 
         self.model = nn.Sequential(
-            nn.Linear(in_features=2 * self.z_size, out_features=64, bias=self.use_bias),
+            nn.Linear(in_features=self.z_size, out_features=64, bias=self.use_bias),
             nn.ReLU(inplace=True),
 
             nn.Linear(in_features=64, out_features=128, bias=self.use_bias),
@@ -86,11 +88,11 @@ class TargetNetwork(nn.Module):
         return layer_data, end_index
 
 
-class Encoder(nn.Module):
+class Encoder(nn.Module, ABC):
     def __init__(self, config):
         super().__init__()
 
-        self.z_size = config['z_size']
+        self.z_size = config['z_size'] // 2
         self.use_bias = config['model']['E']['use_bias']
         self.relu_slope = config['model']['E']['relu_slope']
 
@@ -123,6 +125,8 @@ class Encoder(nn.Module):
         eps = torch.randn_like(std)
         return eps.mul(std).add_(mu)
 
+
+class PocketEncoder(Encoder):
     def forward(self, x):
         output = self.conv(x)
         output2 = output.max(dim=2)[0]
@@ -131,6 +135,15 @@ class Encoder(nn.Module):
         logvar = self.std_layer(logit)
         z = self.reparameterize(mu, logvar)
         return z, mu, torch.exp(logvar)
+
+
+class VisibleEncoder(Encoder):
+    def forward(self, x):
+        output = self.conv(x)
+        output2 = output.max(dim=2)[0]
+        logit = self.fc(output2)
+        mu = self.mu_layer(logit)
+        return mu
 
 
 class Discriminator(nn.Module):

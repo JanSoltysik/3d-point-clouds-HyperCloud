@@ -18,7 +18,7 @@ from models import aae
 from utils.pcutil import plot_3d_point_cloud
 from utils.util import find_latest_epoch, prepare_results_dir, cuda_setup, setup_logging, set_seed
 from utils.points import generate_points
-from datasets.txtDataset import TxtDataset, collate_fn
+from datasets import TxtDataset, Benchmark, collate_fn
 
 cudnn.benchmark = True
 
@@ -73,6 +73,10 @@ def main(config):
         dataset = TxtDataset(root_dir=config['data_dir'],
                              classes=config['classes'],
                              config=config)
+    elif dataset_name == 'benchmark':
+        dataset = Benchmark(root_dir=config['data_dir'],
+                            classes=config['classes'],
+                            config=config)
     else:
         raise ValueError(f'Invalid dataset name. Expected `shapenet` or '
                          f'`faust`. Got: `{dataset_name}`')
@@ -90,8 +94,8 @@ def main(config):
     # Models
     #
     hyper_network = aae.HyperNetwork(config, device).to(device)
-    encoder_pocket = aae.Encoder(config).to(device)
-    encoder_visible = aae.Encoder(config).to(device)
+    encoder_pocket = aae.PocketEncoder(config).to(device)
+    encoder_visible = aae.VisibleEncoder(config).to(device)
 
     hyper_network.apply(weights_init)
     encoder_pocket.apply(weights_init)
@@ -174,7 +178,7 @@ def main(config):
                 X_whole.transpose_(X_whole.dim() - 2, X_whole.dim() - 1)
 
             codes, mu, logvar = encoder_pocket(X)
-            _, mu_visible, _ = encoder_visible(X_visible)
+            mu_visible = encoder_visible(X_visible)
 
             target_networks_weights = hyper_network(torch.cat((codes, mu_visible), 1))
 
