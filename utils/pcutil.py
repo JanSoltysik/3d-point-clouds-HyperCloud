@@ -120,11 +120,9 @@ def plot_3d_point_cloud(x, y, z, show=True, show_axis=True, in_u_sphere=False,
     if title is not None:
         plt.title(title)
 
+    sc = ax.scatter(x, y, z, marker=marker, s=s, alpha=0.5, zorder=1, *args, **kwargs)
     if x1 is not None and y1 is not None and z1 is not None:
-        ax.scatter(x1, y1, z1, color='r', marker=marker, s=s*3, alpha=1, zorder=2, *args, **kwargs)
-        alpha = 0.3
-
-    sc = ax.scatter(x, y, z, marker=marker, s=s, alpha=alpha, zorder=1, *args, **kwargs)
+        ax.scatter(x1, y1, z1, color='r', marker=marker, s=s, alpha=1, zorder=2, *args, **kwargs)
     ax.view_init(elev=elev, azim=azim)
 
     if in_u_sphere:
@@ -151,6 +149,15 @@ def plot_3d_point_cloud(x, y, z, show=True, show_axis=True, in_u_sphere=False,
 
     return fig
 
+
+def pretty_plot(x1, y1, z1, x2, y2, z2, filename):
+    from myavi import mlab
+
+    f = mlab.figure(fgcolor=(0., 0., 0.), bgcolor=(1, 1, 1), size=(1000, 1000))
+    mlab.view(azimuth=10, elevation=90, figure=f)
+    pts = mlab.points3d(x1, y1, z1, color=(0.2, 0.4, 0.5), scale_factor=0.02)
+    pts = mlab.points3d(x2, y2, z2, color=(0.2, 0.1, 0.1), scale_factor=0.02)
+    mlab.savefig(filename=filename)
 
 def transform_point_clouds(X, only_z_rotation=False, deflection=1.0):
     r_rotation = rand_rotation_matrix(deflection)

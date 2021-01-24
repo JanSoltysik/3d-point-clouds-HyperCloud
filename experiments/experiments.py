@@ -12,7 +12,7 @@ import torch.utils.data
 from torch.utils.data import DataLoader
 from models import aae
 
-from utils.pcutil import plot_3d_point_cloud
+from utils.pcutil import plot_3d_point_cloud, pretty_plot
 from utils.util import find_latest_epoch, prepare_results_dir, cuda_setup, setup_logging, set_seed, get_weights_dir
 from utils.points import generate_points
 from datasets import TxtDataset, Benchmark, collate_fn
@@ -59,6 +59,10 @@ def main(config):
         dataset = TxtDataset(root_dir=config['data_dir'],
                              classes=config['classes'],
                              config=config)
+    elif dataset_name == 'benchmark':
+        dataset = Benchmark(root_dir=config['data_dir'],
+                            classes=config['classes'],
+                            config=config)
     else:
         raise ValueError(f'Invalid dataset name. Expected `shapenet` or '
                          f'`faust`. Got: `{dataset_name}`')
@@ -152,6 +156,9 @@ def main(config):
             f'Loss_E: {total_loss_kld / i:.4f} '
         )
 
+        # take the lowest possible first dim
+        min_dim = min(x, key=lambda X: X.shape[2]).shape[2]
+        x = [X[:, :, :min_dim] for X in x]
         x = torch.cat(x)
 
         if config['experiments']['interpolation']['execute']:
@@ -198,12 +205,18 @@ def main(config):
                                        config['experiments']['different_number_of_points']['image_points'])
 
         if config['experiments']['fixed']['execute']:
+            # get visible element from loader (probably should be done using given object for example using
+            # parser
+
+            points_dataloader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=8, drop_last=True,
+                                           pin_memory=True, collate_fn=collate_fn)
             X_visible = next(iter(points_dataloader))['visible'].to(device, dtype=torch.float)
             X_visible.transpose_(X_visible.dim() - 2, X_visible.dim() - 1)
+
             fixed(hyper_network, encoder_visible, X_visible, device, results_dir, epoch,
                   config['experiments']['fixed']['amount'],
                   config['z_size'] // 2, config['experiments']['fixed']['mean'],
-                  config['experiments']['fixed']['std'], (x.shape[1], x.shape[2]),
+                  config['experiments']['fixed']['std'], (3, 2048),
                   config['experiments']['fixed']['triangulation']['execute'],
                   config['experiments']['fixed']['triangulation']['method'],
                   config['experiments']['fixed']['triangulation']['depth'])
@@ -232,6 +245,7 @@ def interpolation(x, encoder, hyper_network, device, results_dir, epoch, amount=
             np.save(join(results_dir, 'interpolations', f'{k}_{j}_interpolation'), np.array(x_int))
 
             fig = plot_3d_point_cloud(x_int[0], x_int[1], x_int[2], in_u_sphere=True, show=False)
+
             fig.savefig(join(results_dir, 'interpolations', f'{k}_{j}_interpolation.png'))
             plt.close(fig)
 
@@ -452,43 +466,50 @@ def different_number_of_points(encoder, hyper_network, x, device, results_dir, e
 
 
 def fixed(hyper_network, encoder_visible, X_visible, device, results_dir, epoch, fixed_number, z_size, fixed_mean,
-          fixed_std, x_shape, triangulation, method, depth):
+          fixed_std, x_shape, triangulation, method, depth, *, number_of_samples=10):
     log.info("Fixed")
 
-    fixed_noise = torch.zeros(fixed_number, z_size).normal_(mean=fixed_mean, std=fixed_std).to(device)
     encoder_output = encoder_visible(X_visible)
-    weights_fixed = hyper_network(torch.cat((fixed_noise, encoder_output), 1))
+    for it in range(number_of_samples):
+        fixed_noise = torch.zeros(fixed_number, z_size).normal_(mean=fixed_mean, std=fixed_std).to(device)
+        weights_fixed = hyper_network(torch.cat((fixed_noise, encoder_output), 1))
 
-    for j, weights in enumerate(weights_fixed):
-        target_network = aae.TargetNetwork(config, weights).to(device)
+        X_visible = X_visible.cpu()
+        for j, weights in enumerate(weights_fixed):
+            target_network = aae.TargetNetwork(config, weights).to(device)
 
-        target_network_input = generate_points(config=config, epoch=epoch, size=(x_shape[1], x_shape[0]))
-        fixed_rec = torch.transpose(target_network(target_network_input.to(device)), 0, 1).cpu().numpy()
-        np.save(join(results_dir, 'fixed', f'{j}_target_network_input'), np.array(target_network_input))
-        np.save(join(results_dir, 'fixed', f'{j}_fixed_reconstruction'), fixed_rec)
-
-        fig = plot_3d_point_cloud(fixed_rec[0], fixed_rec[1], fixed_rec[2], in_u_sphere=True, show=False)
-        fig.savefig(join(results_dir, 'fixed', f'{j}_fixed_reconstructed.png'))
-        plt.close(fig)
-
-        if triangulation:
-            from utils.sphere_triangles import generate
-
-            target_network_input, triangulation = generate(method, depth)
-
-            with open(join(results_dir, 'fixed', f'{j}_triangulation.pickle'), 'wb') as triangulation_file:
-                pickle.dump(triangulation, triangulation_file)
-
+            target_network_input = generate_points(config=config, epoch=epoch, size=(x_shape[1], x_shape[0]))
             fixed_rec = torch.transpose(target_network(target_network_input.to(device)), 0, 1).cpu().numpy()
-            np.save(join(results_dir, 'fixed', f'{j}_target_network_input_triangulation'),
-                    np.array(target_network_input))
-            np.save(join(results_dir, 'fixed', f'{j}_fixed_reconstruction_triangulation'), fixed_rec)
+            np.save(join(results_dir, 'fixed', f'{j}_target_network_input_{it}'), np.array(target_network_input))
+            np.save(join(results_dir, 'fixed', f'{j}_fixed_reconstruction_{it}'), fixed_rec)
 
-            fig = plot_3d_point_cloud(fixed_rec[0], fixed_rec[1], fixed_rec[2], in_u_sphere=True, show=False)
-            fig.savefig(join(results_dir, 'fixed', f'{j}_fixed_reconstructed_triangulation.png'))
+            pretty_plot(fixed_rec[0], fixed_rec[1], fixed_rec[2],
+                        X_visible[j][0], X_visible[j][1], X_visible[j][2],
+                        f'pretty{j}_fixed_reconstructed_{it}.png')
+            fig = plot_3d_point_cloud(fixed_rec[0], fixed_rec[1], fixed_rec[2], in_u_sphere=True, show=False,
+                                      x1=X_visible[j][0], y1=X_visible[j][1], z1=X_visible[j][2])
+
+            fig.savefig(join(results_dir, 'fixed', f'{j}_fixed_reconstructed_{it}.png'))
             plt.close(fig)
 
-        np.save(join(results_dir, 'fixed', f'{j}_fixed_noise'), np.array(fixed_noise[j].cpu()))
+            if triangulation:
+                from utils.sphere_triangles import generate
+
+                target_network_input, triangulation = generate(method, depth)
+
+                with open(join(results_dir, 'fixed', f'{j}_triangulation_{it}.pickle'), 'wb') as triangulation_file:
+                    pickle.dump(triangulation, triangulation_file)
+
+                fixed_rec = torch.transpose(target_network(target_network_input.to(device)), 0, 1).cpu().numpy()
+                np.save(join(results_dir, 'fixed', f'{j}_target_network_input_triangulation_{it}'),
+                        np.array(target_network_input))
+                np.save(join(results_dir, 'fixed', f'{j}_fixed_reconstruction_triangulation_{it}'), fixed_rec)
+
+                fig = plot_3d_point_cloud(fixed_rec[0], fixed_rec[1], fixed_rec[2], in_u_sphere=True, show=False)
+                fig.savefig(join(results_dir, 'fixed', f'{j}_fixed_reconstructed_triangulation_{it}.png'))
+                plt.close(fig)
+
+            np.save(join(results_dir, 'fixed', f'{j}_fixed_noise_{it}'), np.array(fixed_noise[j].cpu()))
 
 
 if __name__ == '__main__':

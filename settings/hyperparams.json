@@ -12,7 +12,7 @@
 
     "dataset": "benchmark",
     "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/benchmark",
-    "classes": [],
+    "classes": ["car"],
     "shuffle": true,
     "transforms": ["rotate"],
     "num_workers": 8,

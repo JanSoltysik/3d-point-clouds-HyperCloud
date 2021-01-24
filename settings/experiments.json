@@ -10,7 +10,7 @@
     "dataset": "benchmark",
     "data_dir": "/mnt/users/jsoltysik/local/3d_point_cloud/dataset/benchmark",
 
-    "classes": [],
+    "classes": ["car"],
     "reconstruction_coef": 0.05,
     "n_points": 2048,
 
@@ -109,9 +109,9 @@
             "execute": true,
             "mean": 0.0,
             "std": 0.015,
-            "amount": 64,
+            "amount": 10,
             "triangulation": {
-                "execute": true,
+                "execute": false,
                 "method": "edge",
                 "depth": 2
             }
